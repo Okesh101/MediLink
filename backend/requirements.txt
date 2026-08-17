@@ -1,0 +1,17 @@
+Flask
+Flask-SQLAlchemy
+Flask-Limiter
+requests
+flask-migrate
+python-dotenv
+flask_cors
+redis
+gunicorn
+psycopg2-binary
+werkzeug
+flask-jwt-extended
+flask_apscheduler
+apscheduler
+pytz
+cloudinary
+pytest

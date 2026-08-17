@@ -1,0 +1,39 @@
+.env
+.env.local
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+*.db
+*.log
+*.pot
+*.py[cod]
+*$py.class
+
+# VS Code settings
+.vscode/
+
+# Test cache
+.pytest_cache
+
+# Python virtual environments
+venv/
+ENV/
+.env/
+env/
+
+# Docker
+docker-compose.override.yml
+*.dockerignore
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Migrations data and build artifacts
+instance/
+.coverage
+htmlcov/
+# migrations/
