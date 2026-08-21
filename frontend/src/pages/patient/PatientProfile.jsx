@@ -50,6 +50,9 @@ export default function PatientProfile() {
           <Row label="Date of birth" value={profile.dob} />
           <Row label="Phone" value={profile.phone} />
           <Row label="Email" value={profile.email} />
+          <Row label="Allergies" value={profile.allergies} />
+          <Row label="Blood Group" value={profile.blood_group} />
+          <Row label="Genotype" value={profile.genotype} />
           <Row label="Joined" value={formatDate(profile.created_at)} />
         </dl>
       ) : null}

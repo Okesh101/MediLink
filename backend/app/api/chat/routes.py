@@ -5,10 +5,10 @@ from flask import Blueprint, request, Response
 from app.services.ai.meddy import handle_patient_chat_stream
 
 chat_bp = Blueprint('chat', __name__)
-logger = logging(__name__)
+logger = logging.getLogger(__name__)
 
 
-@chat_bp.route('/api/v1/ai/chat', methods=['POST'])
+@chat_bp.route('/ai/chat', methods=['POST'])
 def ai_chat():
     data = request.json or {}
     patient_public_id = data.get("patient_public_id")

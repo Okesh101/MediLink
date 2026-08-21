@@ -37,6 +37,14 @@ class Staff(db.Model):
     hospital = db.relationship('Hospital', backref=db.backref(
         'staff_members', lazy='selectin'))
 
+    def set_password(self, password):
+        from werkzeug.security import generate_password_hash
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        from werkzeug.security import check_password_hash
+        return check_password_hash(self.password_hash, password)
+
     roles = db.relationship(
         "Role",
         secondary=actor_roles,

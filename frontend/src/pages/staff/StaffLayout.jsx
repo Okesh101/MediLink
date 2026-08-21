@@ -5,6 +5,7 @@ import {
   ShieldQuestion,
   FolderOpen,
   UserRound,
+  Brain,
 } from "lucide-react";
 import { AppShell } from "../../components/layout/AppShell";
 

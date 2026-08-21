@@ -5,6 +5,7 @@ import {
   FolderOpen,
   Shield,
   UserRound,
+  MessageSquare,
 } from "lucide-react";
 import { AppShell } from "../../components/layout/AppShell";
 
@@ -15,6 +16,12 @@ const navItems = [
     short: "ID",
     icon: <Home className="h-4 w-4" />,
     end: true,
+  },
+  {
+    to: "/patient/ai",
+    label: "AI Assistant",
+    short: "AI",
+    icon: <MessageSquare className="h-4 w-4" />,
   },
   {
     to: "/patient/requests",

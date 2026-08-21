@@ -16,6 +16,8 @@ import StaffLayout from "./pages/staff/StaffLayout";
 import StaffOverview from "./pages/staff/StaffOverview";
 import PatientLookup from "./pages/staff/PatientLookup";
 import PatientRecords from "./pages/staff/PatientRecords";
+import PatientDashboard from "./pages/staff/PatientDashboard";
+import PatientAISummary from "./pages/staff/PatientAISummary";
 import CreateRecord from "./pages/staff/CreateRecord";
 import StaffRecordDetail from "./pages/staff/StaffRecordDetail";
 import StaffRequests from "./pages/staff/StaffRequests";
@@ -29,6 +31,7 @@ import PatientAccess from "./pages/patient/PatientAccess";
 import PatientRecordsList from "./pages/patient/PatientRecords";
 import PatientRecordDetail from "./pages/patient/PatientRecordDetail";
 import PatientProfile from "./pages/patient/PatientProfile";
+import PatientAI from "./pages/patient/PatientAI";
 
 import ProtectedRoute from "./routes/ProtectedRoute";
 import ActorRoute from "./routes/ActorRoute";
@@ -64,6 +67,8 @@ export default function App() {
             <Route path="requests" element={<StaffRequests />} />
             <Route path="mine" element={<StaffMine />} />
             <Route path="patients/:publicId" element={<PatientRecords />} />
+            <Route path="patients/:publicId/dashboard" element={<PatientDashboard />} />
+            <Route path="patients/:publicId/ai-summary" element={<PatientAISummary />} />
             <Route path="patients/:publicId/new" element={<CreateRecord />} />
             <Route path="records/:recordId" element={<StaffRecordDetail />} />
             <Route path="profile" element={<StaffProfile />} />
@@ -77,6 +82,7 @@ export default function App() {
             <Route path="access" element={<PatientAccess />} />
             <Route path="records" element={<PatientRecordsList />} />
             <Route path="records/:recordId" element={<PatientRecordDetail />} />
+            <Route path="ai" element={<PatientAI />} />
             <Route path="profile" element={<PatientProfile />} />
           </Route>
         </Route>

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { PageHeader, Spinner, Alert, EmptyState } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
-import { RecordFolder } from "../../components/records/RecordFolder";
+import DataTable from "../../components/ai/DataTable";
 import { recordsApi } from "../../services/records";
 import { getErrorMessage } from "../../services/api";
 
@@ -65,11 +65,57 @@ export default function PatientRecords() {
     ? `${lookup.firstname} ${lookup.lastname}`
     : decoded;
 
+  const columns = [
+    {
+      key: "hospital_name",
+      label: "Hospital",
+      sortable: true,
+      filterable: true
+    },
+    {
+      key: "diagnosis",
+      label: "Diagnosis",
+      sortable: true,
+      render: (value) => value || "N/A"
+    },
+    {
+      key: "doctor_name",
+      label: "Doctor",
+      sortable: true,
+      filterable: true
+    },
+    {
+      key: "created_at",
+      label: "Date",
+      sortable: true,
+      render: (value) => new Date(value).toLocaleDateString()
+    },
+    {
+      key: "status",
+      label: "Status",
+      sortable: true,
+      filterable: true,
+      render: (value) => (
+        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+          value === "completed" 
+            ? "bg-green-100 text-green-700" 
+            : "bg-yellow-100 text-yellow-700"
+        }`}>
+          {value || "Active"}
+        </span>
+      )
+    }
+  ];
+
+  const handleRowClick = (record) => {
+    navigate(`/staff/records/${record.id}`);
+  };
+
   return (
     <div>
       <PageHeader
         title={name}
-        description="Past folders from every hospital that treated this patient. You can read them; you cannot edit or delete them. Open a new folder for today’s visit."
+        description="Past folders from every hospital that treated this patient. You can read them; you cannot edit or delete them. Open a new folder for today's visit."
         actions={
           !accessMeta ? (
             <Link to={`/staff/patients/${encodeURIComponent(decoded)}/new`}>
@@ -103,15 +149,13 @@ export default function PatientRecords() {
           }
         />
       ) : (
-        <div className="grid gap-4">
-          {records.map((r) => (
-            <RecordFolder
-              key={r.id}
-              record={r}
-              href={`/staff/records/${r.id}`}
-            />
-          ))}
-        </div>
+        <DataTable
+          data={records}
+          columns={columns}
+          onRowClick={handleRowClick}
+          searchable={true}
+          filterable={true}
+        />
       )}
     </div>
   );

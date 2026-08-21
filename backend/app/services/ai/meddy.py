@@ -5,6 +5,7 @@ import logging
 # from groq import Groq
 from app import db
 from app.models.Patient import Patient
+from app.models.AIConversation import AIConversation
 from app.models.ChatMessage import ChatMessage
 from app.services.ai.client import client
 from app.services.ai.prompts import MEDDY_CHAT_SYSTEM_PROMPT
@@ -12,7 +13,10 @@ from app.services.ai.tools import GROQ_TOOLS, handle_tool_call
 
 logger = logging.getLogger(__name__)
 
-TEXT_MODEL = "meta-llama/llama-prompt-guard-2-86m"
+# Primary model for quality medical reasoning (largest available)
+TEXT_MODEL = "openai/gpt-oss-120b"
+# Fallback model for higher volume when rate limits are hit
+FALLBACK_MODEL = "openai/gpt-oss-20b"
 
 
 def handle_patient_chat_stream(patient_public_id: str, new_user_message: str):
@@ -29,10 +33,24 @@ def handle_patient_chat_stream(patient_public_id: str, new_user_message: str):
         yield f"event: error\ndata: {json.dumps({'message': 'Patient not found.'})}\n\n"
         return
 
-    # 2. Load past chat history (last 15 messages)
+    # 2. Get or create active conversation
+    conversation = db.session.execute(
+        db.select(AIConversation)
+        .filter_by(patient_public_id=patient_public_id, status='active')
+        .order_by(AIConversation.created_at.desc())
+    ).scalar_one_or_none()
+
+    if not conversation:
+        conversation = AIConversation(
+            patient_public_id=patient_public_id, status='active')
+        db.session.add(conversation)
+        db.session.commit()
+        db.session.refresh(conversation)
+
+    # 3. Load past chat history (last 15 messages)
     history_records = db.session.execute(
         db.select(ChatMessage)
-        .filter_by(patient_public_id=patient_public_id)
+        .filter_by(conversation_id=conversation.id)
         .order_by(ChatMessage.created_at.asc())
         .limit(15)
     ).scalars().all()
@@ -46,14 +64,15 @@ def handle_patient_chat_stream(patient_public_id: str, new_user_message: str):
     messages.append({"role": "user", "content": new_user_message})
 
     # Persist user message to DB
-    _persist_chat_message(patient_public_id, "user", new_user_message)
+    _persist_chat_message(
+        conversation.id, patient_public_id, "user", new_user_message)
 
     yield f"event: status\ndata: {json.dumps({'message': 'Processing request...'})}\n\n"
 
     try:
         # 4. First Groq request (allows AI to decide if DB tools are needed)
         response = client.chat.completions.create(
-            model=TEXT_MODEL,
+            model=FALLBACK_MODEL,
             messages=messages,
             tools=GROQ_TOOLS,
             tool_choice="auto",
@@ -113,7 +132,8 @@ def handle_patient_chat_stream(patient_public_id: str, new_user_message: str):
                 yield f"data: {json.dumps({'content': delta})}\n\n"
 
         # Save AI reply to ChatMessage history
-        _persist_chat_message(patient_public_id, "assistant", full_reply)
+        _persist_chat_message(
+            conversation.id, patient_public_id, "assistant", full_reply)
 
     except Exception as e:
         logger.error(f"Chat execution failed: {e}", exc_info=True)
@@ -122,8 +142,9 @@ def handle_patient_chat_stream(patient_public_id: str, new_user_message: str):
     yield "event: end\ndata: [DONE]\n\n"
 
 
-def _persist_chat_message(patient_public_id: str, role: str, content: str):
+def _persist_chat_message(conversation_id: str, patient_public_id: str, role: str, content: str):
     msg = ChatMessage(
+        conversation_id=conversation_id,
         patient_public_id=patient_public_id,
         role=role,
         content=content

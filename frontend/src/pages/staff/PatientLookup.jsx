@@ -1,143 +1,93 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { PageHeader, Alert, Spinner } from "../../components/ui/Badge";
+import { PageHeader, Spinner, Alert, EmptyState } from "../../components/ui/Badge";
+import { Input } from "../../components/ui/Input";
 import { Button } from "../../components/ui/Button";
-import { Input, TextArea } from "../../components/ui/Input";
 import { recordsApi } from "../../services/records";
-import { accessApi } from "../../services/access";
 import { getErrorMessage } from "../../services/api";
 
 export default function PatientLookup() {
-  const [query, setQuery] = useState("");
-  const [patient, setPatient] = useState(null);
-  const [reason, setReason] = useState("");
-  const [error, setError] = useState("");
-  const [info, setInfo] = useState("");
-  const [looking, setLooking] = useState(false);
-  const [requesting, setRequesting] = useState(false);
   const navigate = useNavigate();
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [searched, setSearched] = useState(false);
 
-  async function onLookup(e) {
+  const handleSearch = async (e) => {
     e.preventDefault();
-    setError("");
-    setInfo("");
-    setPatient(null);
-    const publicId = query.trim();
-    if (!publicId) return;
-    setLooking(true);
-    try {
-      const { data } = await recordsApi.lookupPatient(publicId);
-      setPatient(data.data);
-    } catch (err) {
-      setError(getErrorMessage(err, "Patient not found."));
-    } finally {
-      setLooking(false);
-    }
-  }
+    if (!query.trim()) return;
 
-  async function onRequest() {
-    if (!patient) return;
+    setLoading(true);
     setError("");
-    setInfo("");
-    setRequesting(true);
+    setResults([]);
+    setSearched(true);
+
     try {
-      await accessApi.request({
-        patient_public_id: patient.public_id,
-        reason: reason.trim() || undefined,
-      });
-      setInfo("Request sent. Wait for the patient to approve on their phone.");
-      setPatient({ ...patient, has_pending_request: true });
+      const { data } = await recordsApi.lookupPatient(query.trim());
+      setResults([data.data]);
     } catch (err) {
-      setError(getErrorMessage(err, "Could not send request."));
+      setError(getErrorMessage(err, "Patient not found. Check the Health ID and try again."));
     } finally {
-      setRequesting(false);
+      setLoading(false);
     }
-  }
+  };
 
   return (
-    <div className="max-w-xl">
+    <div>
       <PageHeader
-        title="Find a patient"
-        description="Enter the Health ID they show you. Confirm it is the right person before requesting records."
+        title="Find patient"
+        description="Ask for the patient's Health ID and enter it below to look up their records."
       />
-
-      <form
-        className="flex flex-col gap-3 sm:flex-row sm:items-end"
-        onSubmit={onLookup}
-      >
-        <Input
-          className="flex-1"
-          label="Health ID"
-          name="public_id"
-          value={query}
-          onChange={(e) => setQuery(e.target.value.toUpperCase())}
-          placeholder="BC4-DG7-MN9Z"
-          required
-        />
-        <Button type="submit" disabled={looking}>
-          {looking ? "Searching…" : "Search"}
-        </Button>
+      <form onSubmit={handleSearch} className="max-w-md">
+        <div className="flex gap-2">
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Enter Health ID (e.g., ABC123456789)"
+            className="flex-1"
+          />
+          <Button type="submit" disabled={loading}>
+            {loading ? "Searching..." : "Search"}
+          </Button>
+        </div>
       </form>
 
-      {error ? <Alert className="mt-4">{error}</Alert> : null}
-      {info ? (
-        <Alert tone="success" className="mt-4">
-          {info}
-        </Alert>
-      ) : null}
+      {error && <Alert className="mt-4">{error}</Alert>}
 
-      {looking ? (
-        <div className="flex justify-center py-10">
-          <Spinner />
-        </div>
-      ) : null}
+      {searched && results.length === 0 && !loading && !error && (
+        <EmptyState
+          title="No patient found"
+          description="No patient matches this Health ID. Double-check the ID with the patient."
+        />
+      )}
 
-      {patient ? (
-        <div className="mt-6 rounded-2xl border border-line bg-white p-5">
-          <p className="text-xs uppercase tracking-[0.16em] text-muted">
-            Confirm identity
-          </p>
-          <p className="mt-2 font-display text-2xl">
-            {patient.firstname} {patient.lastname}
-          </p>
-          <p className="mt-1 public-id text-sm text-teal-800">{patient.public_id}</p>
-          <p className="mt-2 text-sm text-muted">
-            {patient.sex} · Born {patient.dob}
-          </p>
-
-          {patient.has_active_grant ? (
-            <div className="mt-5">
-              <p className="text-sm text-teal-800">
-                You already have active access to this patient’s folders.
-              </p>
-              <Button
-                className="mt-3"
-                onClick={() =>
-                  navigate(`/staff/patients/${encodeURIComponent(patient.public_id)}`)
-                }
-              >
-                Open folders
-              </Button>
+      {results.length > 0 && (
+        <div className="mt-6 space-y-3">
+          {results.map((patient) => (
+            <div
+              key={patient.public_id}
+              className="bg-white border border-line rounded-xl p-4 hover:border-teal-400 cursor-pointer transition-colors"
+              onClick={() => navigate(`/staff/patients/${encodeURIComponent(patient.public_id)}/dashboard`)}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-medium">
+                    {patient.firstname} {patient.lastname}
+                  </h3>
+                  <p className="text-sm text-muted mt-1">ID: {patient.public_id}</p>
+                </div>
+                <div className="text-right text-sm text-muted">
+                  {patient.dob && (
+                    <div>DOB: {new Date(patient.dob).toLocaleDateString()}</div>
+                  )}
+                  {patient.sex && <div>Sex: {patient.sex}</div>}
+                </div>
+              </div>
             </div>
-          ) : patient.has_pending_request ? (
-            <p className="mt-5 text-sm text-amber-800">
-              A request is already waiting for this patient to approve.
-            </p>
-          ) : (
-            <div className="mt-5 space-y-3">
-              <TextArea
-                label="Reason (optional)"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="e.g. Walk-in with chest pain"
-              />
-              <Button onClick={onRequest} disabled={requesting}>
-                {requesting ? "Sending…" : "Request access"}
-              </Button>
-            </div>
-          )}
+          ))}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
