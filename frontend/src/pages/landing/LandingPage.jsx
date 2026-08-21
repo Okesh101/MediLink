@@ -110,7 +110,7 @@ export default function LandingPage() {
                 Sign in
               </Link>
               <Link to="/auth/hospital">
-                <Button className="bg-white text-teal-900 hover:bg-teal-50">
+                <Button className="hover:text-teal-900 hover:bg-white/50 bg-teal-50">
                   For hospitals
                 </Button>
               </Link>
@@ -296,7 +296,7 @@ export default function LandingPage() {
                 <Button
                   className={`w-full ${
                     plan.highlighted
-                      ? "bg-white text-teal-900 hover:bg-teal-50"
+                      ? " text-teal-900 hover:bg-teal-50"
                       : ""
                   }`}
                   variant={plan.highlighted ? "primary" : "secondary"}
