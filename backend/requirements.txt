@@ -15,3 +15,5 @@ apscheduler
 pytz
 cloudinary
 pytest
+google-genai
+groq

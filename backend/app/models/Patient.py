@@ -42,6 +42,12 @@ class Patient(db.Model):
 
     email = db.Column(db.String(150), nullable=True, unique=True)
 
+    # NEW PATIENT DATA FIELDS
+    # e.g., "Penicillin, Peanuts"
+    allergies = db.Column(db.Text, nullable=True)
+    blood_group = db.Column(db.String(5), nullable=True)
+    genotype = db.Column(db.String(5), nullable=True)
+
     password_hash = db.Column(db.String(255), nullable=False)
 
     created_at = db.Column(
