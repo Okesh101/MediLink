@@ -3,11 +3,11 @@
 from app import db
 from app.models.Role import actor_roles, Role
 from app.utils.types import Sex
-from sqlalchemy.dialects.postgresql import UUID
+from app.utils.db_types import GUID
+from app.utils.time import lagos_now, to_lagos_iso
 from sqlalchemy import event, and_
 import uuid
 import hashlib
-from zoneinfo import ZoneInfo
 
 
 SEX_CHOICES = ", ".join(
@@ -24,17 +24,15 @@ class Patient(db.Model):
         ),
     )
 
-    # Configure ID as a true UUID string type
     id = db.Column(
-        UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid.uuid4,
-        server_default=db.text("gen_random_uuid()"),
         nullable=False
     )
     public_id = db.Column(db.String(12), unique=True,
                           nullable=False, index=True)
-    
+
     firstname = db.Column(db.String(100), nullable=False)
     lastname = db.Column(db.String(100), nullable=False)
     sex = db.Column(db.String(10), nullable=False)
@@ -48,12 +46,14 @@ class Patient(db.Model):
 
     created_at = db.Column(
         db.DateTime(timezone=True),
-        server_default=db.text("TIMEZONE('Africa/Lagos', NOW())")
+        default=lagos_now,
+        server_default=db.func.now()
     )
     updated_at = db.Column(
         db.DateTime(timezone=True),
-        server_default=db.text("TIMEZONE('Africa/Lagos', NOW())"),
-        onupdate=db.text("TIMEZONE('Africa/Lagos', NOW())")
+        default=lagos_now,
+        onupdate=lagos_now,
+        server_default=db.func.now()
     )
 
     # Polymorphic Relationship for Patient roles
@@ -69,12 +69,10 @@ class Patient(db.Model):
         overlaps="roles,hospitals,staff_members"
     )
 
-    # Helper method to set hashed password
     def set_password(self, password):
         from werkzeug.security import generate_password_hash
         self.password_hash = generate_password_hash(password)
 
-    # Helper method to verify password during login
     def check_password(self, password):
         from werkzeug.security import check_password_hash
         return check_password_hash(self.password_hash, password)
@@ -89,22 +87,17 @@ class Patient(db.Model):
         )
 
     def to_dict(self):
-        created_at_iso = None
-        if self.created_at:
-            tz = ZoneInfo("Africa/Lagos")
-            created_at_iso = (self.created_at if self.created_at.tzinfo else self.created_at.replace(
-                tzinfo=tz)).astimezone(tz).isoformat()
-
         return {
             "id": str(self.id),
             "firstname": self.firstname,
             "lastname": self.lastname,
             "sex": self.sex,
             "phone": self.phone,
+            "email": self.email,
             "public_id": self.public_id,
             "dob": self.dob.strftime('%Y-%m-%d') if self.dob else None,
             "roles": [r.name for r in self.roles],
-            "created_at": created_at_iso
+            "created_at": to_lagos_iso(self.created_at)
         }
 
 

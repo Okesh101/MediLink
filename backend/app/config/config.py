@@ -3,6 +3,7 @@
 import os
 from dotenv import load_dotenv
 from datetime import timedelta
+from sqlalchemy.pool import StaticPool
 
 load_dotenv()
 
@@ -37,8 +38,8 @@ class Config:
 
     REDIS_URL = redis_url
 
-    # Ratelimt Storage Config
-    RATELIMIT_STORAGE_URI = REDIS_URL
+    # Ratelimit Storage Config
+    RATELIMIT_STORAGE_URI = "memory://"
 
     # JWT needs a secret key
     JWT_SECRET_KEY = os.getenv(
@@ -49,8 +50,12 @@ class Config:
         os.getenv('JWT_REFRESH_TOKEN_EXPIRES', 2592000)))
 
     CLOUD_NAME = os.getenv("CLOUD_NAME")
+    CLOUDINARY_CLOUD_NAME = os.getenv("CLOUD_NAME") or os.getenv(
+        "CLOUDINARY_CLOUD_NAME")
     CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
     CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
+
+    ACCESS_GRANT_HOURS = int(os.getenv("ACCESS_GRANT_HOURS", 24))
 
 
 class DevelopmentConfig(Config):
@@ -70,3 +75,26 @@ class ProductionConfig(Config):
         # CRITICAL: Validates the connection before running any SQL queries
         "pool_pre_ping": True,
     }
+
+
+class TestingConfig(Config):
+    """Isolated in-memory configuration used by pytest."""
+    TESTING = True
+    DEBUG = False
+    SECRET_KEY = "test-secret-key"
+    JWT_SECRET_KEY = "test-jwt-secret-key-that-is-long-enough-32b"
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
+    JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=1)
+    SQLALCHEMY_DATABASE_URI = "sqlite://"
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "connect_args": {"check_same_thread": False},
+        "poolclass": StaticPool,
+    }
+    REDIS_URL = "memory://"
+    RATELIMIT_STORAGE_URI = "memory://"
+    RATELIMIT_ENABLED = False
+    ACCESS_GRANT_HOURS = 24
+    CLOUD_NAME = "test-cloud"
+    CLOUDINARY_CLOUD_NAME = "test-cloud"
+    CLOUDINARY_API_KEY = "test-key"
+    CLOUDINARY_API_SECRET = "test-secret"

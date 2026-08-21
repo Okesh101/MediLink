@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 def init_cloudinary(app):
     """Call this inside create_app() to register config."""
     cloudinary.config(
-        cloud_name=app.config.get("CLOUDINARY_CLOUD_NAME"),
+        cloud_name=app.config.get("CLOUDINARY_CLOUD_NAME") or app.config.get("CLOUD_NAME"),
         api_key=app.config.get("CLOUDINARY_API_KEY"),
         api_secret=app.config.get("CLOUDINARY_API_SECRET"),
         secure=True

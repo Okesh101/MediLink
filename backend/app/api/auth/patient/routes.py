@@ -10,20 +10,19 @@ from app import db, limiter
 from app.models.Role import Role
 from app.models.Patient import Patient
 from app.models.TokenBlocklist import TokenBlocklist
-from app.utils.decorators import permissions_required
+from app.utils.decorators import permissions_required, actor_types_required
+from app.utils.helpers import as_uuid
 from app.utils.types import Sex
 
 auth_patient_bp = Blueprint("auth_patient", __name__)
 logger = logging.getLogger(__name__)
 
 
-# api/v1/auth/patient/register
 @auth_patient_bp.route("/register", methods=["POST"])
 @limiter.limit('10 per minute')
 def register_endpoint():
     data = request.get_json() or {}
 
-    # Strict dictionary presence validation (replaces old unsafe all() evaluation)
     required_fields = ['firstname', 'lastname',
                        'sex', 'phone', 'dob',
                        'nin', 'password']
@@ -35,9 +34,8 @@ def register_endpoint():
             "code": 400
         }), 400
 
-    raw_dob = data.get('dob')  # Frontend sends "1995-04-23"
+    raw_dob = data.get('dob')
     try:
-        # Validate that the string strictly follows YYYY-MM-DD
         parsed_dob = datetime.strptime(raw_dob, '%Y-%m-%d').date()
     except ValueError:
         logger.warning(
@@ -48,7 +46,6 @@ def register_endpoint():
             "code": 400
         }), 400
 
-    # Phone normalization verification
     phone = str(data.get('phone', '')).strip()
     if not phone.isdigit() or len(phone) != 11:
         logger.warning("Attempt to register with invalid phone number.")
@@ -58,7 +55,6 @@ def register_endpoint():
             "code": 400
         }), 400
 
-    # NIN normalization verification
     nin = str(data.get('nin', '')).strip()
     if not nin.isdigit() or len(nin) != 11:
         logger.warning("Attempt to register with invalid NIN.")
@@ -69,20 +65,20 @@ def register_endpoint():
         }), 400
 
     sex = str(data.get('sex', '')).strip().lower()
-    if sex == 'f' or sex == 'female':
+    if sex in ('f', 'female'):
         real_sex = Sex.FEMALE.value
-    elif sex == 'm' or sex == 'male':
+    elif sex in ('m', 'male'):
         real_sex = Sex.MALE.value
     else:
-        logger.warning("Attempt to register with invalid sex. Must be male or female.")
+        logger.warning(
+            "Attempt to register with invalid sex. Must be male or female.")
         return jsonify({
             "status": "ERROR",
             "message": "Sex must be either male or female.",
             "code": 400
         }), 400
 
-    # Check phone uniqueness before executing heavy operations
-    if db.session.execute(db.select(Patient).filter_by(phone=data['phone'])).scalar_one_or_none():
+    if db.session.execute(db.select(Patient).filter_by(phone=phone)).scalar_one_or_none():
         logger.warning("Attempt to register with existing phone.")
         return jsonify({
             "status": "ERROR",
@@ -101,7 +97,6 @@ def register_endpoint():
     )
     new_patient.set_password(data['password'])
 
-    # Setup roles safely
     patient_role = db.session.execute(
         db.select(Role).filter_by(name="Patient")).scalar_one_or_none()
 
@@ -121,14 +116,16 @@ def register_endpoint():
         new_patient.assign_role(patient_role)
         db.session.commit()
 
+        created = db.session.get(Patient, new_patient.id)
+
         return jsonify({
             "status": "CREATED",
             "message": "Patient registered successfully!",
+            "data": created.to_dict(),
             "code": 201
         }), 201
     except IntegrityError as e:
         db.session.rollback()
-        # Check if the unique constraint failed for phone or nin code
         err_msg = str(e.orig)
         if "phone" in err_msg:
             message = "Phone number already registered."
@@ -152,8 +149,7 @@ def register_endpoint():
         }), 409
     except Exception as e:
         db.session.rollback()
-        # Log the actual raw error on your Kubuntu server logs securely
-        logger.error(f"Registration crash: {str(e)}", exc_info=True)
+        logger.error("Registration crash: %s", str(e), exc_info=True)
         return jsonify({
             "status": "ERROR",
             "message": "An internal system error occurred. Please try again later.",
@@ -161,7 +157,6 @@ def register_endpoint():
         }), 500
 
 
-# api/v1/auth/patient/login
 @auth_patient_bp.route("/login", methods=["POST"])
 @limiter.limit('10 per minute')
 def login_endpoint():
@@ -175,7 +170,6 @@ def login_endpoint():
             "code": 400
         }), 400
 
-    # Modern SQLAlchemy 2.0 select query execution syntax
     patient = db.session.execute(db.select(Patient).filter_by(
         phone=data['phone'])).scalar_one_or_none()
 
@@ -187,13 +181,15 @@ def login_endpoint():
             "message": "Invalid phone or password"
         }), 401
 
+    extra_claims = {"actor_type": "patient"}
     access_token = create_access_token(
         identity=str(patient.id),
-        additional_claims={
-            "actor_type": "patient"
-        }
+        additional_claims=extra_claims
     )
-    refresh_token = create_refresh_token(identity=str(patient.id))
+    refresh_token = create_refresh_token(
+        identity=str(patient.id),
+        additional_claims=extra_claims
+    )
 
     return jsonify({
         "status": "SUCCESS",
@@ -205,20 +201,20 @@ def login_endpoint():
     }), 200
 
 
-# api/v1/auth/patient/me
 @auth_patient_bp.route("/me", methods=["GET"])
 @limiter.limit('30 per minute')
 @jwt_required()
-@permissions_required("patient:manage_personal_data")
+@actor_types_required("patient")
+@permissions_required("patient:manage_profile")
 def get_profile_endpoint():
-    current_patient_id = get_jwt_identity()
-
-    # Modern execution replacement for deprecated .query.get()
+    current_patient_id = as_uuid(get_jwt_identity())
     patient = db.session.get(Patient, current_patient_id)
 
     if not patient:
         logger.warning(
-            f"Patient with ID {current_patient_id} not found during profile retrieval.")
+            "Patient with ID %s not found during profile retrieval.",
+            current_patient_id
+        )
         return jsonify({
             "status": "ERROR",
             "code": 404,
@@ -233,31 +229,25 @@ def get_profile_endpoint():
     }), 200
 
 
-# api/v1/auth/patient/logout
 @auth_patient_bp.route("/logout", methods=['POST'])
 @limiter.limit('30 per minute')
 @jwt_required()
 def logout_endpoint():
-    # 1. Revoke the active Access Token (from Header)
     access_claims = get_jwt()
     access_jti = access_claims['jti']
     db.session.add(TokenBlocklist(jti=access_jti))
 
-    # 2. Grab Refresh Token from custom header
     refresh_token = request.headers.get("X-Refresh-Token")
 
     if refresh_token:
         from flask_jwt_extended import decode_token
         try:
-            # Safely decode the token claims without verifying signatures again
             refresh_claims = decode_token(refresh_token)
             refresh_jti = refresh_claims.get('jti')
 
-            # Double check that it actually is a refresh token type
             if refresh_claims.get('type') == 'refresh' and refresh_jti:
                 db.session.add(TokenBlocklist(jti=refresh_jti))
         except Exception:
-            # If token is completely malformed or corrupted, skip silently
             pass
 
     db.session.commit()
@@ -269,7 +259,6 @@ def logout_endpoint():
     }), 200
 
 
-# api/v1/auth/patient/refresh
 @auth_patient_bp.route("/refresh", methods=['POST'])
 @limiter.limit('20 per minute')
 @jwt_required(refresh=True)
@@ -282,5 +271,6 @@ def refresh_endpoint():
         })
     return jsonify({
         "status": "SUCCESS",
-        "access_token": new_access_token
+        "access_token": new_access_token,
+        "code": 200
     }), 200

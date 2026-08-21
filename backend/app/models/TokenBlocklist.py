@@ -1,6 +1,8 @@
 # app/models/TokenBlocklist.py
 
 from app import db
+from app.utils.time import lagos_now
+
 
 class TokenBlocklist(db.Model):
     __tablename__ = 'token_blocklist'
@@ -9,9 +11,9 @@ class TokenBlocklist(db.Model):
                    nullable=False, autoincrement=True)
     jti = db.Column(db.String(36),
                     nullable=False,
-                    index=True)  # Unique identifier
+                    index=True)
     created_at = db.Column(db.DateTime(timezone=True),
                            nullable=False,
-                           server_default=db.text(
-                               "TIMEZONE('Africa/Lagos', NOW())")
+                           default=lagos_now,
+                           server_default=db.func.now()
                            )

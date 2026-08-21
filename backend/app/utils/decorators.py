@@ -7,40 +7,58 @@ from flask_jwt_extended import get_jwt_identity, get_jwt
 from app.models.Staff import Staff
 from app.models.Hospital import Hospital
 from app.models.Patient import Patient
+from app.utils.helpers import as_uuid
 
 
 def _get_current_actor():
-    """Helper function to load the authenticated actor (Staff, Hospital, or Patient)
-
+    """Load the authenticated actor (Staff, Hospital, or Patient)
     based on JWT identity and actor_type claim.
     """
 
-    actor_id = get_jwt_identity()
+    actor_id = as_uuid(get_jwt_identity())
     claims = get_jwt()
-    # Expecting: 'staff', 'hospital_admin', or 'patient'
     actor_type = claims.get("actor_type")
 
-    print("=== AUTH DEBUG ===")
-    print("JWT IDENTITY:", actor_id)
-    print("JWT CLAIMS:", claims)
-    print("ACTOR TYPE:", actor_type)
+    if actor_id is None:
+        return None
 
     if actor_type == "hospital_admin":
         return db.session.get(Hospital, actor_id)
-    elif actor_type == "patient":
+    if actor_type == "patient":
         return db.session.get(Patient, actor_id)
-    elif actor_type == "staff":
+    if actor_type == "staff":
         return db.session.get(Staff, actor_id)
-    else:
-        actor = None
+    return None
 
-    print("ACTOR:", actor)
 
-    if actor:
-        print("ACTOR TYPE:", type(actor).__name__)
-        print("ROLES:", [r.name for r in getattr(actor, "roles", [])])
+def actor_types_required(*allowed_types: str):
+    """Restrict an endpoint to one or more JWT actor types.
 
-    return actor
+    Must be placed BELOW @jwt_required().
+    Usage: @actor_types_required("staff", "patient")
+    """
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            claims = get_jwt()
+            actor_type = claims.get("actor_type")
+
+            if actor_type not in allowed_types:
+                return jsonify({
+                    "status": "ERROR",
+                    "code": 403,
+                    "message": (
+                        "Forbidden. This action is not available "
+                        "for the current account type."
+                    ),
+                }), 403
+
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def roles_required(*role_names: str):
@@ -67,14 +85,11 @@ def roles_required(*role_names: str):
                     401,
                 )
 
-            # Extract actor's role names dynamically
             actor_roles = {role.name for role in getattr(actor, "roles", [])}
 
-            # Super Admin override
             if "Super Admin" in actor_roles:
                 return fn(*args, **kwargs)
 
-            # Verify if actor has at least one of the requested roles
             if not any(r in actor_roles for r in role_names):
                 return (
                     jsonify(
@@ -82,8 +97,8 @@ def roles_required(*role_names: str):
                             "status": "ERROR",
                             "code": 403,
                             "message": (
-                                "Forbidden! You do not have the required role"
-                                " to access this resource."
+                                "Forbidden. You do not have the required role "
+                                "to access this resource."
                             ),
                         }
                     ),
@@ -124,18 +139,15 @@ def permissions_required(*required_permissions: str, match_all: bool = False):
             actor_roles = getattr(actor, "roles", [])
             role_names = {r.name for r in actor_roles}
 
-            # Global Super Admin override
             if "Super Admin" in role_names:
                 return fn(*args, **kwargs)
 
-            # Compile set of all permissions across all assigned roles
             actor_permissions = {
                 perm.name
                 for role in actor_roles
                 for perm in getattr(role, "permissions", [])
             }
 
-            # Evaluation check based on matching strategy
             if match_all:
                 has_access = all(
                     perm in actor_permissions for perm in required_permissions
@@ -152,8 +164,8 @@ def permissions_required(*required_permissions: str, match_all: bool = False):
                             "status": "ERROR",
                             "code": 403,
                             "message": (
-                                "Unauthorized. Missing required permissions:"
-                                f" {list(required_permissions)}"
+                                "Forbidden. Missing required permission(s) "
+                                f"for this action."
                             ),
                         }
                     ),

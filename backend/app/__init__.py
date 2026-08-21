@@ -7,14 +7,14 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_limiter.errors import RateLimitExceeded
 from flask_migrate import Migrate
-from flask_jwt_extended import JWTManager  # Import it
+from flask_jwt_extended import JWTManager
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import event
 
-from app.config.config import DevelopmentConfig, ProductionConfig  # Import the class
+from app.config.config import DevelopmentConfig, ProductionConfig, TestingConfig
 from werkzeug.exceptions import MethodNotAllowed, NotFound
 from app.services.cloudinary.cloudinary import init_cloudinary
 
-# Import Scheduler Extensions
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
 import os
@@ -33,7 +33,6 @@ limiter = Limiter(
 redis_client = None
 logger = logging.getLogger(__name__)
 
-# Declare scheduler globally so other modules can import or view it
 scheduler = BackgroundScheduler(
     executors={'default': ThreadPoolExecutor(5)},
     job_defaults={'coalesce': True, 'max_instances': 1},
@@ -41,15 +40,19 @@ scheduler = BackgroundScheduler(
 )
 
 
-def create_app():
+def create_app(config_object=None):
     app = Flask(__name__)
 
-    # Dynamically select which config class to pull depending on environment state
-    env = os.getenv('FLASK_ENV', 'development')
-    if env == 'production':
-        app.config.from_object(ProductionConfig)
+    if config_object is not None:
+        app.config.from_object(config_object)
     else:
-        app.config.from_object(DevelopmentConfig)
+        env = os.getenv('FLASK_ENV', 'development')
+        if env == 'production':
+            app.config.from_object(ProductionConfig)
+        elif env == 'testing':
+            app.config.from_object(TestingConfig)
+        else:
+            app.config.from_object(DevelopmentConfig)
 
     db.init_app(app)
     migrate.init_app(app, db)
@@ -58,23 +61,30 @@ def create_app():
     init_cloudinary(app)
 
     global redis_client
-    redis_client = Redis.from_url(
-        app.config['REDIS_URL'],
-        decode_responses=True
-    )
+    if app.config.get("TESTING"):
+        redis_client = None
+    elif app.config.get("REDIS_URL"):
+        redis_client = Redis.from_url(
+            app.config['REDIS_URL'],
+            decode_responses=True
+        )
+    else:
+        redis_client = None
+
+    with app.app_context():
+        if str(app.config.get("SQLALCHEMY_DATABASE_URI") or "").startswith("sqlite"):
+            event.listen(db.engine, "connect", _set_sqlite_pragma)
 
     # Force load models into the application context for migrations
     from app.models.TokenBlocklist import TokenBlocklist
     from app.models.Patient import Patient
-    from app.models.PatientDetails import PatientDetails
     from app.models.Hospital import Hospital
     from app.models.Staff import Staff
     from app.models.Role import Role, actor_roles, role_permissions
     from app.models.Permission import Permission
-    from app.models.MedicalRecords import LoanRequest
-    from app.models.RecordDocuments import RequestDocuments
-    from app.models.Loan import Loan
-    from app.models.Repayment import Repayment
+    from app.models.MedicalRecord import MedicalRecord
+    from app.models.RecordDocuments import RecordDocuments
+    from app.models.Access import Requests, AccessGrants
 
     # Blueprints
     from app.api.health.routes import health_bp
@@ -83,7 +93,8 @@ def create_app():
     from app.api.auth.staff.routes import auth_staff_bp
     from app.api.patient.routes import patient_bp
     from app.api.staff.routes import staff_bp
-    from app.api.loan.routes import loan_bp
+    from app.api.records.routes import records_bp
+    from app.api.access.routes import access_bp
 
     app.register_blueprint(health_bp, url_prefix='/api/v1/health')
     app.register_blueprint(auth_patient_bp, url_prefix='/api/v1/auth/patient')
@@ -92,33 +103,23 @@ def create_app():
     app.register_blueprint(auth_staff_bp, url_prefix='/api/v1/auth/staff')
     app.register_blueprint(patient_bp, url_prefix='/api/v1/patient')
     app.register_blueprint(staff_bp, url_prefix="/api/v1/staff")
-    app.register_blueprint(loan_bp, url_prefix="/api/v1/loan")
+    app.register_blueprint(records_bp, url_prefix="/api/v1/records")
+    app.register_blueprint(access_bp, url_prefix="/api/v1/access")
 
-    # ====================================================================
-    # REGISTER CUSTOM MANAGEMENT COMMANDS
-    # ====================================================================
     @app.cli.command("seed-permissions")
     def seed_permissions_command():
         """Flask CLI integration hook to safely force populate database rules."""
         logger.info("Booting core system database permissions synchronizer...")
-
-        # We push the runtime context explicitly right here
         with app.app_context():
-            # Import inside context to avoid any circular dependency traps
-            from app.__init__ import seed_system_permissions_and_roles
             seed_system_permissions_and_roles()
-
         logger.info("Permissions synchronization complete.")
 
-    # ====================================================================
-    # INITIALIZE BACKGROUND SCHEDULER
-    # ====================================================================
-    # Prevents Werkzeug's reload thread from spinning up a second duplicate scheduler instance
-    if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-        # Import your job function safely inside factory to prevent circular reference cycles
+    if (
+        not app.config.get("TESTING")
+        and (not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true")
+    ):
         from app.services.scheduler.apscheduler import continuous_ping
 
-        # Setup jobs
         scheduler.add_job(
             id='ping_server',
             func=continuous_ping,
@@ -127,7 +128,6 @@ def create_app():
             replace_existing=True
         )
 
-        # CHECK IF THE SCHEDULER IS ALREADY RUNNING FIRST
         if not scheduler.running:
             scheduler.start()
             atexit.register(lambda: scheduler.shutdown())
@@ -135,10 +135,6 @@ def create_app():
         else:
             logger.warning(
                 "Scheduler already active, skipping initialization.")
-
-    # ====================================================================
-    # GLOBAL API ERROR HANDLERS (Registered directly on the active 'app')
-    # ====================================================================
 
     @app.errorhandler(RateLimitExceeded)
     def handle_rate_limit_exceeded(e):
@@ -167,22 +163,24 @@ def create_app():
     @app.errorhandler(IntegrityError)
     def handle_integrity_error(error):
         db.session.rollback()
-
-        logger.info("INTEGRITY ERROR:", error)
-        logger.info("ORIGINAL:", error.orig)
-
-        return {
+        logger.info("INTEGRITY ERROR: %s", error)
+        return jsonify({
             "status": "ERROR",
             "code": 409,
             "message": "A record duplicate conflict occurred."
-        }, 409
+        }), 409
 
     return app
 
 
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
 @jwt.token_in_blocklist_loader
 def check_if_token_revoked(jwt_header, jwt_payload):
-    # Import the model here to avoid circular imports
     from app.models.TokenBlocklist import TokenBlocklist
     jti = jwt_payload["jti"]
 
@@ -190,66 +188,59 @@ def check_if_token_revoked(jwt_header, jwt_payload):
         db.select(TokenBlocklist).filter_by(jti=jti)
     ).scalar_one_or_none()
 
-    # If token is found in the blocklist table, returns True (Access Denied)
-    # If token is NOT found, returns False (Access Granted)
     return token is not None
 
 
-# Function to add roles and permissions
 def seed_system_permissions_and_roles():
     """Idempotently populates core permissions and maps them to default roles."""
     from app.models.Permission import Permission
     from app.models.Role import Role
-    from app import db
 
-    # 1. Define ALL system permissions.
-    system_permissions = [  # All permissions
-        # General Permissions
-        "hospital:manage_personal_data",
-        "staff:manage_personal_data",
-        "patient:manage_personal_data",
-        # Hospital Administration
+    system_permissions = [
+        "patient:manage_profile",
+        "staff:manage_profile",
+        "hospital:manage_profile",
         "hospital:manage_staff",
+        "hospital:view_staff",
         "hospital:manage_roles",
         "hospital:view_analytics",
-        # Medical Records & Consultations
+        "patient:lookup",
+        "access:request",
+        "access:review",
+        "access:view_requests",
+        "access:revoke",
         "medical_record:read",
         "medical_record:write",
-        # Prescriptions & Labs
+        "medical_record:view_own",
         "lab:upload_results",
         "lab:view_results",
-        # Patients & Finance
-        "patient:submit_kyc",
-        "loan:apply",
-        "loan:approve",
-        "loan:manage_requests",
-        "loan:view_repayment",
-        "loan:history",
     ]
-    hospital_admin_allowed = [  # Hospital Admin permissions
+    hospital_admin_allowed = [
+        "hospital:manage_profile",
         "hospital:manage_staff",
+        "hospital:view_staff",
         "hospital:manage_roles",
         "hospital:view_analytics",
-        "loan:manage_requests",
-        "hospital:manage_personal_data"
     ]
-    doctor_allowed = [  # Doctor permissions
+    doctor_allowed = [
+        "staff:manage_profile",
+        "patient:lookup",
+        "access:request",
+        "access:view_requests",
         "medical_record:read",
         "medical_record:write",
         "lab:upload_results",
-        "loan:apply",
-        "loan:manage_requests",
-        "staff:manage_personal_data"
+        "lab:view_results",
     ]
-    patient_allowed = [  # Patient permissions
-        "patient:manage_personal_data",
-        "patient:submit_kyc",
-        "loan:view_repayment",
-        "loan:history",
+    patient_allowed = [
+        "patient:manage_profile",
+        "access:review",
+        "access:view_requests",
+        "access:revoke",
+        "medical_record:view_own",
     ]
 
     try:
-        # 2. Seed missing permissions safely
         permission_objects = {}
         for perm_name in system_permissions:
             perm = db.session.execute(db.select(Permission).filter_by(
@@ -257,13 +248,11 @@ def seed_system_permissions_and_roles():
             if not perm:
                 perm = Permission(name=perm_name)
                 db.session.add(perm)
-                logger.info(f"Created system permission: '{perm_name}'")
+                logger.info("Created system permission: '%s'", perm_name)
             permission_objects[perm_name] = perm
 
-        # Flush variations to DB so objects obtain relational state
         db.session.flush()
 
-        # 3. Helper function to ensure roles exist
         def get_or_create_role(role_name):
             role = db.session.execute(
                 db.select(Role).filter_by(name=role_name)
@@ -280,7 +269,6 @@ def seed_system_permissions_and_roles():
 
         db.session.flush()
 
-        # 4. Map Permissions to Roles (Idempotently)
         role_mappings = [
             (hospital_admin_role, hospital_admin_allowed),
             (doctor_role, doctor_allowed),
@@ -293,7 +281,6 @@ def seed_system_permissions_and_roles():
                 if target_perm not in role_obj.permissions:
                     role_obj.permissions.append(target_perm)
 
-        # Super Admins receive all system permissions
         for target_perm in permission_objects.values():
             if target_perm not in super_admin_role.permissions:
                 super_admin_role.permissions.append(target_perm)
@@ -304,5 +291,5 @@ def seed_system_permissions_and_roles():
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error occurred while seeding permissions: {str(e)}")
+        logger.error("Error occurred while seeding permissions: %s", str(e))
         print("Warning: Auto-seeding permissions failed! Check logs for details.")
