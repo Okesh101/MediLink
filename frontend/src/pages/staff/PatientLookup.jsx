@@ -4,6 +4,7 @@ import { PageHeader, Spinner, Alert, EmptyState } from "../../components/ui/Badg
 import { Input } from "../../components/ui/Input";
 import { Button } from "../../components/ui/Button";
 import { recordsApi } from "../../services/records";
+import { accessApi } from "../../services/access";
 import { getErrorMessage } from "../../services/api";
 
 export default function PatientLookup() {
@@ -13,6 +14,7 @@ export default function PatientLookup() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searched, setSearched] = useState(false);
+  const [requesting, setRequesting] = useState(false);
 
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -30,6 +32,22 @@ export default function PatientLookup() {
       setError(getErrorMessage(err, "Patient not found. Check the Health ID and try again."));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRequestAccess = async (patientPublicId) => {
+    setRequesting(true);
+    setError("");
+
+    try {
+      await accessApi.request({ patient_public_id: patientPublicId });
+      // Refresh the lookup to get updated status
+      const { data } = await recordsApi.lookupPatient(query.trim());
+      setResults([data.data]);
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to request access. Please try again."));
+    } finally {
+      setRequesting(false);
     }
   };
 
@@ -67,11 +85,10 @@ export default function PatientLookup() {
           {results.map((patient) => (
             <div
               key={patient.public_id}
-              className="bg-white border border-line rounded-xl p-4 hover:border-teal-400 cursor-pointer transition-colors"
-              onClick={() => navigate(`/staff/patients/${encodeURIComponent(patient.public_id)}/dashboard`)}
+              className="bg-white border border-line rounded-xl p-4 hover:border-teal-400 transition-colors"
             >
               <div className="flex items-center justify-between">
-                <div>
+                <div className="flex-1 cursor-pointer" onClick={() => patient.has_active_grant && navigate(`/staff/patients/${encodeURIComponent(patient.public_id)}/dashboard`)}>
                   <h3 className="font-medium">
                     {patient.firstname} {patient.lastname}
                   </h3>
@@ -84,6 +101,28 @@ export default function PatientLookup() {
                   {patient.sex && <div>Sex: {patient.sex}</div>}
                 </div>
               </div>
+              {!patient.has_active_grant && (
+                <div className="mt-4 pt-4 border-t border-line">
+                  {patient.has_pending_request ? (
+                    <div className="text-sm text-muted">
+                      Access request pending. Waiting for patient approval.
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRequestAccess(patient.public_id);
+                      }}
+                      disabled={requesting}
+                    >
+                      {requesting ? "Requesting..." : "Request Access"}
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>
