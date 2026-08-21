@@ -55,6 +55,15 @@ class Staff(db.Model):
         overlaps="roles"
     )
 
+    def assign_role(self, role):
+        db.session.execute(
+            actor_roles.insert().values(
+                actor_id=self.id,
+                actor_type="staff",
+                role_id=role.id
+            )
+        )
+
     def to_dict(self):
         return {
             "id": str(self.id),
