@@ -85,25 +85,36 @@ def handle_patient_chat_stream(patient_public_id: str, new_user_message: str):
         # 5. Handle DB Tool Execution if Groq requests data
         if response_message.tool_calls:
             # Append assistant's intent to call tool
-            messages.append(response_message)
-
-            for tool_call in response_message.tool_calls:
-                fn_name = tool_call.function.name
-                fn_args = json.loads(tool_call.function.arguments)
-
-                # Send live status to React UI
-                yield f"event: status\ndata: {json.dumps({'message': f'Searching medical database ({fn_name})...'})}\n\n"
-
-                # Execute Python/SQL query safely
-                tool_output = handle_tool_call(fn_name, fn_args)
-
-                # Return data result back to Groq context
+            if response_message.tool_calls:
+                # Convert Pydantic object to dict or append structured role
                 messages.append({
-                    "tool_call_id": tool_call.id,
-                    "role": "tool",
-                    "name": fn_name,
-                    "content": json.dumps(tool_output)
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        } for tc in response_message.tool_calls
+                    ]
                 })
+
+                for tool_call in response_message.tool_calls:
+                    fn_name = tool_call.function.name
+                    fn_args = json.loads(tool_call.function.arguments)
+
+                    yield f"event: status\ndata: {json.dumps({'message': f'Searching medical database ({fn_name})...'})}\n\n"
+
+                    tool_output = handle_tool_call(fn_name, fn_args)
+
+                    messages.append({
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": fn_name,
+                        "content": json.dumps(tool_output)
+                    })
 
             # Stream final response built with tool output
             stream_response = client.chat.completions.create(
