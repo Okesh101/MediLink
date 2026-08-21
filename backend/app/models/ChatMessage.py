@@ -11,6 +11,12 @@ class ChatMessage(db.Model):
 
     id = db.Column(GUID(), primary_key=True,
                    default=uuid.uuid4, nullable=False)
+    conversation_id = db.Column(
+        GUID(),
+        db.ForeignKey('ai_conversations.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True
+    )
     patient_public_id = db.Column(
         db.String(12),
         db.ForeignKey('patients.public_id', ondelete='CASCADE'),

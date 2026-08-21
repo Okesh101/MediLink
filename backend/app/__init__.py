@@ -85,6 +85,9 @@ def create_app(config_object=None):
     from app.models.MedicalRecord import MedicalRecord
     from app.models.RecordDocuments import RecordDocuments
     from app.models.Access import Requests, AccessGrants
+    from app.models.AIConversation import AIConversation
+    from app.models.ChatMessage import ChatMessage
+    from app.models.SystemModels import TimelineEvent
 
     # Blueprints
     from app.api.health.routes import health_bp
@@ -95,6 +98,7 @@ def create_app(config_object=None):
     from app.api.staff.routes import staff_bp
     from app.api.records.routes import records_bp
     from app.api.access.routes import access_bp
+    from app.api.chat.routes import chat_bp
 
     app.register_blueprint(health_bp, url_prefix='/api/v1/health')
     app.register_blueprint(auth_patient_bp, url_prefix='/api/v1/auth/patient')
@@ -105,6 +109,7 @@ def create_app(config_object=None):
     app.register_blueprint(staff_bp, url_prefix="/api/v1/staff")
     app.register_blueprint(records_bp, url_prefix="/api/v1/records")
     app.register_blueprint(access_bp, url_prefix="/api/v1/access")
+    app.register_blueprint(chat_bp, url_prefix="/api/v1")
 
     @app.cli.command("seed-permissions")
     def seed_permissions_command():
