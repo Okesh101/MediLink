@@ -1,11 +1,11 @@
 # app/models/RecordDocuments.py
 
 from app import db
-from sqlalchemy.dialects.postgresql import UUID
-from zoneinfo import ZoneInfo
+from app.utils.db_types import GUID
+from app.utils.time import lagos_now, to_lagos_iso
 
 
-class RequestDocuments(db.Model):
+class RecordDocuments(db.Model):
     __tablename__ = 'record_documents'
 
     id = db.Column(
@@ -13,35 +13,32 @@ class RequestDocuments(db.Model):
         nullable=False, autoincrement=True
     )
     record_id = db.Column(
-        UUID(as_uuid=True),
+        GUID(),
         db.ForeignKey('medical_records.id', ondelete='CASCADE'),
-        nullable=False
+        nullable=False,
+        index=True
     )
     title = db.Column(db.String(255), nullable=False)
     doc_url = db.Column(db.Text, nullable=False)
 
     uploaded_at = db.Column(
         db.DateTime(timezone=True),
-        server_default=db.text("TIMEZONE('Africa/Lagos', NOW())")
+        default=lagos_now,
+        server_default=db.func.now()
     )
 
     updated_at = db.Column(
         db.DateTime(timezone=True),
-        server_default=db.text("TIMEZONE('Africa/Lagos', NOW())"),
-        onupdate=db.text("TIMEZONE('Africa/Lagos', NOW())")
+        default=lagos_now,
+        onupdate=lagos_now,
+        server_default=db.func.now()
     )
 
     def to_dict(self):
-        uploaded_at_iso = None
-        if self.uploaded_at:
-            tz = ZoneInfo("Africa/Lagos")
-            uploaded_at_iso = (self.uploaded_at if self.uploaded_at.tzinfo else self.uploaded_at.replace(
-                tzinfo=tz)).astimezone(tz).isoformat()
-
         return {
-            "id": str(self.id),
+            "id": self.id,
             "record_id": str(self.record_id),
             "title": self.title,
             "doc_url": self.doc_url,
-            "uploaded_at": uploaded_at_iso
+            "uploaded_at": to_lagos_iso(self.uploaded_at)
         }

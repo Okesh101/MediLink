@@ -1,7 +1,7 @@
 # app/models/Role.py
 
 from app import db
-from sqlalchemy.dialects.postgresql import UUID
+from app.utils.db_types import GUID
 
 
 role_permissions = db.Table(
@@ -16,7 +16,7 @@ actor_roles = db.Table(
     'actor_roles',
     db.Column(
         'actor_id',
-        UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         nullable=False
     ),

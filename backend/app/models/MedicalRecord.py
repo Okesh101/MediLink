@@ -1,45 +1,48 @@
 # app/models/MedicalRecord.py
 
 from app import db
-from sqlalchemy.dialects.postgresql import UUID
+from app.utils.db_types import GUID
+from app.utils.time import lagos_now, to_lagos_iso
 import uuid
-from zoneinfo import ZoneInfo
 
 
 class MedicalRecord(db.Model):
     __tablename__ = 'medical_records'
 
     id = db.Column(
-        UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid.uuid4,
-        server_default=db.text("gen_random_uuid()"),
         nullable=False
     )
     hospital_id = db.Column(
-        UUID(as_uuid=True),
+        GUID(),
         db.ForeignKey('hospitals.id', ondelete='CASCADE'),
-        nullable=False
+        nullable=False,
+        index=True
     )
     doctor_id = db.Column(
-        UUID(as_uuid=True),
+        GUID(),
         db.ForeignKey('staff.id', ondelete='CASCADE'),
-        nullable=False
+        nullable=False,
+        index=True
     )
     patient_public_id = db.Column(
         db.String(12),
         db.ForeignKey('patients.public_id', ondelete='CASCADE'),
-        nullable=False
+        nullable=False,
+        index=True
     )
+    chief_complaint = db.Column(db.Text, nullable=True)
     diagnosis = db.Column(db.Text, nullable=False)
     doctor_notes = db.Column(db.Text, nullable=True)
 
     created_at = db.Column(
         db.DateTime(timezone=True),
-        server_default=db.text("TIMEZONE('Africa/Lagos', NOW())")
+        default=lagos_now,
+        server_default=db.func.now()
     )
 
-    # Direct 1-to-Many back to Documents
     documents = db.relationship(
         'RecordDocuments',
         backref='medical_record',
@@ -47,20 +50,31 @@ class MedicalRecord(db.Model):
         lazy='selectin'
     )
 
-    def to_dict(self):
-        created_at_iso = None
-        if self.created_at:
-            tz = ZoneInfo("Africa/Lagos")
-            created_at_iso = (self.created_at if self.created_at.tzinfo else self.created_at.replace(
-                tzinfo=tz)).astimezone(tz).isoformat()
+    hospital = db.relationship(
+        'Hospital',
+        backref=db.backref('medical_records', lazy='selectin')
+    )
+    doctor = db.relationship(
+        'Staff',
+        backref=db.backref('authored_records', lazy='selectin')
+    )
+    patient = db.relationship(
+        'Patient',
+        foreign_keys=[patient_public_id],
+        backref=db.backref('medical_records', lazy='selectin')
+    )
 
+    def to_dict(self):
         return {
             "id": str(self.id),
             "hospital_id": str(self.hospital_id),
+            "hospital_name": self.hospital.name if self.hospital else None,
             "doctor_id": str(self.doctor_id),
+            "doctor_name": self.doctor.name if self.doctor else None,
             "patient_public_id": self.patient_public_id,
+            "chief_complaint": self.chief_complaint,
             "diagnosis": self.diagnosis,
             "doctor_notes": self.doctor_notes,
-            "record_docs": [doc.to_dict() for doc in self.documents] if self.documents else None,
-            "created_at": created_at_iso,
+            "documents": [doc.to_dict() for doc in self.documents] if self.documents else [],
+            "created_at": to_lagos_iso(self.created_at),
         }
